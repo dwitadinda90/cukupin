@@ -52,6 +52,28 @@ body.cukupin-authenticated #cloud-auth {
   position:sticky; top:0; z-index:40; display:flex; flex-direction:row;
 }
 body.cukupin-authenticated #cloud-auth .login-brand { display:none !important; }
+/* Password recovery is a standalone screen: never expose the app behind it. */
+body.cukupin-recovery .shell,
+body.cukupin-recovery #mobile-nav,
+body.cukupin-recovery .overlay { display:none !important; }
+body.cukupin-recovery #cloud-auth {
+  position:fixed; inset:0; z-index:10000; box-sizing:border-box;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:18px; padding:28px 20px; background:#fbfaf5; border:0; overflow:auto;
+}
+body.cukupin-recovery #cloud-auth .login-brand { display:flex !important; }
+body.cukupin-recovery #cloud-auth .cloud-actions,
+body.cukupin-recovery #cloud-auth #cloud-logged-in { display:none !important; }
+body.cukupin-recovery #cloud-auth #cloud-reset-panel {
+  display:flex !important; width:min(100%,360px); flex-direction:column; gap:12px;
+}
+body.cukupin-recovery #cloud-auth input,
+body.cukupin-recovery #cloud-auth button {
+  box-sizing:border-box; width:100%; max-width:none; min-height:48px;
+  padding:12px 14px; border-radius:12px;
+}
+body.cukupin-recovery #cloud-auth input { border:1px solid #d8ded7; background:#fff; }
+body.cukupin-recovery #cloud-auth .cloud-status { width:min(100%,360px); text-align:center; }
 
 </style>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js" type="text/javascript"></script>
@@ -318,9 +340,9 @@ let data;try{data=JSON.parse(localStorage.getItem(KEY))||fresh()}catch{data=fres
 function normalize(x){if(!x||typeof x!=='object'||Array.isArray(x))return fresh();return {period:/^\d{4}-(0[1-9]|1[0-2])$/.test(x.period)?x.period:today().slice(0,7),budgets:x.budgets&&typeof x.budgets==='object'&&!Array.isArray(x.budgets)?x.budgets:{},transactions:Array.isArray(x.transactions)?x.transactions:[],recurring:Array.isArray(x.recurring)?x.recurring:[],notes:x.notes&&typeof x.notes==='object'?x.notes:{},onboarded:!!x.onboarded,demo:!!x.demo}}
 data=normalize(data);
 const SUPABASE_URL='https://cychzjimtlmqhxdukjeg.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_vDpsLz6gAZTc9nmLZg0BiA_I-rbASmP';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_vDpsLz6gAZTc9nmLZg0BiA_I-rbASpM';
 const cloudClient=window.supabase?.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
-let cloudUser=null, cloudReady=false, cloudTimer=null, cloudSaving=false, cloudPending=false;
+let cloudUser=null, cloudReady=false, cloudTimer=null, cloudSaving=false, cloudPending=false, recoveryMode=false;
 function cloudStatus(message,isError=false){const el=$('cloud-status');if(!el)return;el.textContent=message;el.classList.toggle('error',isError)}
 function getDisplayName(user){
   const metadataName=user?.user_metadata?.full_name||user?.user_metadata?.name||user?.user_metadata?.display_name;
@@ -336,7 +358,8 @@ function updateHomeGreeting(user=cloudUser){
 }
 function updateAuthUI(){
   const signed=!!cloudUser;
-  document.body.classList.toggle('cukupin-authenticated',!!(signed&&cloudReady));
+  document.body.classList.toggle('cukupin-recovery',recoveryMode);
+  document.body.classList.toggle('cukupin-authenticated',!!(signed&&cloudReady&&!recoveryMode));
   updateHomeGreeting(cloudUser);
   $('cloud-actions').hidden=signed;
   $('cloud-logged-in').hidden=!signed;
@@ -363,6 +386,7 @@ function queueCloudSave(){
   clearTimeout(cloudTimer);cloudTimer=setTimeout(cloudSaveNow,700);
 }
 async function loadCloudForUser(user){
+  if(recoveryMode)return;
   cloudUser=user;cloudReady=false;updateAuthUI();cloudStatus('Memuat data akun...');
   try{
     const {data:row,error}=await cloudClient.from('user_app_state').select('app_data').eq('user_id',user.id).maybeSingle();
@@ -382,6 +406,7 @@ async function loadCloudForUser(user){
       cloudStatus('Data browser disalin ke cloud untuk akun ini');
     }
     cloudReady=true;render();updateAuthUI();
+    if(!data.onboarded){step=0;drawOnboarding();open('onboarding-modal')}
   }catch(err){
     console.error('Cukupin cloud load:',err);
     cloudReady=false;cloudStatus('Gagal memuat cloud: '+(err.message||'periksa koneksi'),true);
@@ -411,10 +436,12 @@ async function initCloud(){
     cloudStatus('Jika email terdaftar, tautan pemulihan akan dikirim. Periksa Inbox dan folder Spam.');
   };
   $('cloud-cancel-recovery').onclick=async()=>{
-    $('cloud-reset-panel').hidden=true;
-    $('cloud-actions').hidden=false;
+    await cloudClient.auth.signOut();
+    recoveryMode=false;cloudUser=null;cloudReady=false;
+    document.body.classList.remove('cukupin-recovery','cukupin-authenticated');
+    $('cloud-reset-panel').hidden=true;$('cloud-actions').hidden=false;
     $('cloud-new-password').value='';$('cloud-confirm-password').value='';
-    cloudStatus('Silakan masuk menggunakan email dan password akun.');
+    updateAuthUI();cloudStatus('Pemulihan dibatalkan. Silakan masuk dengan email dan password akun.');
   };
   $('cloud-update-password').onclick=async()=>{
     const password=$('cloud-new-password').value,confirm=$('cloud-confirm-password').value;
@@ -424,10 +451,11 @@ async function initCloud(){
     const {error}=await cloudClient.auth.updateUser({password});
     if(error){console.error('Cukupin update password:',error);cloudStatus('Password belum berhasil diperbarui: '+error.message,true);return}
     $('cloud-new-password').value='';$('cloud-confirm-password').value='';
-    $('cloud-reset-panel').hidden=true;$('cloud-actions').hidden=false;
     await cloudClient.auth.signOut();
-    cloudUser=null;cloudReady=false;updateAuthUI();
-    cloudStatus('Password berhasil diperbarui. Silakan masuk dengan password baru.');
+    recoveryMode=false;cloudUser=null;cloudReady=false;
+    document.body.classList.remove('cukupin-recovery','cukupin-authenticated');
+    $('cloud-reset-panel').hidden=true;$('cloud-actions').hidden=false;
+    updateAuthUI();cloudStatus('Password berhasil diperbarui. Silakan masuk dengan password baru.');
   };
   $('cloud-signup').onclick=async()=>{
     const email=$('cloud-email').value.trim(),password=$('cloud-password').value;
@@ -448,6 +476,9 @@ async function initCloud(){
   $('cloud-sync').onclick=async()=>{if(!cloudUser)return;await cloudSaveNow()};
   cloudClient.auth.onAuthStateChange((event,session)=>{
     if(event==='PASSWORD_RECOVERY'){
+      recoveryMode=true;cloudUser=null;cloudReady=false;
+      document.body.classList.remove('cukupin-authenticated');
+      document.body.classList.add('cukupin-recovery');
       $('cloud-actions').hidden=true;
       $('cloud-logged-in').hidden=true;
       $('cloud-reset-panel').hidden=false;
@@ -462,9 +493,14 @@ async function initCloud(){
   setup();
   const {data:sessionData,error}=await cloudClient.auth.getSession();
   if(error){cloudStatus('Tidak dapat memeriksa sesi login.',true);return}
+  if(recoveryMode){
+    $('cloud-actions').hidden=true;$('cloud-logged-in').hidden=true;$('cloud-reset-panel').hidden=false;
+    updateAuthUI();
+    cloudStatus('Tautan pemulihan terverifikasi. Silakan buat password baru.');
+    return;
+  }
   if(sessionData.session?.user)await loadCloudForUser(sessionData.session.user);
   else updateAuthUI();
-  if(!data.onboarded){drawOnboarding();open('onboarding-modal')}
 }
 function store(){try{localStorage.setItem(KEY,JSON.stringify(data));queueCloudSave();return true}catch{toast('Tidak bisa menyimpan. Periksa ruang penyimpanan browser.','error');return false}}
 function toast(text,type='ok'){let el=$('toast');el.textContent=text;el.className='notice '+(type==='error'?'error':type==='warn'?'warn':'');el.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.style.display='none',4100)}
@@ -493,7 +529,7 @@ const onboarding=[['Selamat datang di Cukupin.','Biar gaji tahu ke mana harus pe
 function drawOnboarding(){let [title,desc,keys]=onboarding[step];$('onboard-step-label').textContent=`LANGKAH ${step+1} DARI 3`;$('onboard-heading').textContent=title;$('onboard-description').textContent=desc;$('onboard-fields').innerHTML=keys.map(k=>`<label class="field" for="onboard-${k}">${esc(fields.find(f=>f[0]===k)[1])} (Rupiah)<input id="onboard-${k}" type="number" min="0" step="1" inputmode="numeric" value="${safe(budget()[k])||''}" placeholder="0"></label>`).join('');$('onboard-next').textContent=step===2?'Buka Catat':'Lanjut'}
 function finishOnboarding(toCatat){data.onboarded=true;store();close('onboarding-modal');render();if(toCatat)go('catat')}
 function demo(){let p=data.period;data.demo=true;data.budgets[p]={salary:8000000,extra:0,bills:1500000,installment:1200000,house:2100000,transport:600000,children:700000,periodic:400000,saving:500000,flex:1000000};if(store()){render();close('settings-modal');go('home');toast('Mode DEMO aktif. Angka ini hanya contoh; belum ada transaksi nyata.')}}
-function setup(){let navHTML=nav.map(([id,icon,label])=>`<button type="button" class="nav-item ${id==='home'?'selected':''}" data-go="${id}"><span aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('');$('mobile-nav').innerHTML=navHTML;$('desktop-nav').innerHTML=navHTML;$('filter-category').innerHTML='<option value="">Semua kategori</option>'+categories.map(c=>`<option>${esc(c)}</option>`).join('');$('tx-category').innerHTML=categories.map(c=>`<option>${esc(c)}</option>`).join('');$('budget-fields').innerHTML=fields.map(([key,name])=>`<label class="field" for="budget-${key}">${esc(name)} (Rupiah)<input id="budget-${key}" name="${key}" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></label>`).join('');render();if(!data.onboarded){drawOnboarding();open('onboarding-modal')}}
+function setup(){let navHTML=nav.map(([id,icon,label])=>`<button type="button" class="nav-item ${id==='home'?'selected':''}" data-go="${id}"><span aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('');$('mobile-nav').innerHTML=navHTML;$('desktop-nav').innerHTML=navHTML;$('filter-category').innerHTML='<option value="">Semua kategori</option>'+categories.map(c=>`<option>${esc(c)}</option>`).join('');$('tx-category').innerHTML=categories.map(c=>`<option>${esc(c)}</option>`).join('');$('budget-fields').innerHTML=fields.map(([key,name])=>`<label class="field" for="budget-${key}">${esc(name)} (Rupiah)<input id="budget-${key}" name="${key}" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></label>`).join('');render()}
 document.addEventListener('click',e=>{let goBtn=e.target.closest('[data-go]');if(goBtn){go(goBtn.dataset.go);return}let closing=e.target.closest('[data-close]');if(closing){close(closing.dataset.close);return}let action=e.target.closest('[data-action]');if(action){let id=action.dataset.id;switch(action.dataset.action){case'open-transaction':transaction();break;case'edit-tx':transaction(id);break;case'delete-tx':ask('Hapus transaksi ini? Tindakan ini tidak dapat dibatalkan.',()=>{data.transactions=data.transactions.filter(t=>t.id!==id);store();render();toast('Transaksi dihapus.')},'Hapus transaksi');break;case'edit-rec':recurring(id);break;case'delete-rec':ask('Hapus kebutuhan berkala ini?',()=>{data.recurring=data.recurring.filter(r=>r.id!==id);store();render();toast('Kebutuhan dihapus.')},'Hapus kebutuhan')}}});
 $('add-transaction').onclick=()=>transaction();$('add-recurring').onclick=()=>recurring();$('period-home').onchange=e=>setPeriod(e.target.value);['filter-month','filter-category','filter-type'].forEach(id=>$(id).addEventListener('change',renderTransactions));
 $('transaction-form').addEventListener('submit',e=>{e.preventDefault();let button=$('tx-submit');if(button.disabled)return;let amount=Number($('tx-amount').value),date=$('tx-date').value,description=$('tx-desc').value.trim();if(!Number.isSafeInteger(amount)||amount<=0||!date||!description){toast('Isi tanggal, keterangan, dan nominal positif dalam Rupiah.','error');return}button.disabled=true;try{let t={id:txEdit||crypto.randomUUID(),date,category:$('tx-category').value,description,amount,method:$('tx-method').value};if(txEdit){let index=data.transactions.findIndex(x=>x.id===txEdit);if(index<0)throw Error('missing');data.transactions[index]=t}else data.transactions.push(t);if(store()){close('transaction-modal');render();go('catat');toast(txEdit?'Transaksi diperbarui.':'Transaksi berhasil disimpan.')}}catch{toast('Transaksi tidak ditemukan. Coba buka kembali daftar.','error')}finally{button.disabled=false}});
