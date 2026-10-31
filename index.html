@@ -51,14 +51,7 @@ body:not(.cukupin-authenticated) #cloud-auth .cloud-status {
 body.cukupin-authenticated #cloud-auth {
   position:sticky; top:0; z-index:40; display:flex; flex-direction:row;
 }
-    /* Perbaikan tampilan setelah login */
-#cloud-auth [hidden] {
-  display: none !important;
-}
-
-body.cukupin-authenticated #cloud-auth .login-brand {
-  display: none !important;
-}
+body.cukupin-authenticated #cloud-auth .login-brand { display:none !important; }
 
 </style>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js" type="text/javascript"></script>
@@ -71,7 +64,8 @@ body.cukupin-authenticated #cloud-auth .login-brand {
 #cloud-auth button{border:0;border-radius:8px;padding:9px 12px;background:#176b55;color:white;cursor:pointer;font-weight:600}
 #cloud-auth button.secondary{background:#edf2f0;color:#23483d}
 #cloud-auth .cloud-status{font-size:12px;color:#52635d}
-#cloud-auth .cloud-status.error{color:#b42318}\n#cloud-auth [hidden]{display:none!important}
+#cloud-auth .cloud-status.error{color:#b42318}
+#cloud-auth [hidden]{display:none!important}
 @media(max-width:600px){#cloud-auth input{max-width:100%;width:100%}#cloud-auth .cloud-actions{width:100%}#cloud-auth .cloud-actions button{flex:1}}
 </style>
 </head>
@@ -83,6 +77,14 @@ body.cukupin-authenticated #cloud-auth .login-brand {
       <input id="cloud-password" type="password" autocomplete="current-password" placeholder="Kata sandi" aria-label="Kata sandi">
       <button id="cloud-signin" type="button">Masuk</button>
       <button id="cloud-signup" class="secondary" type="button">Daftar</button>
+      <button id="cloud-forgot-password" class="secondary" type="button">Lupa Password?</button>
+    </div>
+    <div id="cloud-reset-panel" class="cloud-actions" hidden>
+      <p style="margin:0;text-align:center;font-weight:700;color:#315b47">Buat Password Baru</p>
+      <input id="cloud-new-password" type="password" autocomplete="new-password" placeholder="Password baru (minimal 8 karakter)" aria-label="Password baru">
+      <input id="cloud-confirm-password" type="password" autocomplete="new-password" placeholder="Ulangi password baru" aria-label="Ulangi password baru">
+      <button id="cloud-update-password" type="button">Simpan Password Baru</button>
+      <button id="cloud-cancel-recovery" class="secondary" type="button">Kembali ke Login</button>
     </div>
     <div id="cloud-logged-in" hidden>
       <span id="cloud-user-email"></span>
@@ -316,7 +318,7 @@ let data;try{data=JSON.parse(localStorage.getItem(KEY))||fresh()}catch{data=fres
 function normalize(x){if(!x||typeof x!=='object'||Array.isArray(x))return fresh();return {period:/^\d{4}-(0[1-9]|1[0-2])$/.test(x.period)?x.period:today().slice(0,7),budgets:x.budgets&&typeof x.budgets==='object'&&!Array.isArray(x.budgets)?x.budgets:{},transactions:Array.isArray(x.transactions)?x.transactions:[],recurring:Array.isArray(x.recurring)?x.recurring:[],notes:x.notes&&typeof x.notes==='object'?x.notes:{},onboarded:!!x.onboarded,demo:!!x.demo}}
 data=normalize(data);
 const SUPABASE_URL='https://cychzjimtlmqhxdukjeg.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_vDpsLz6gAZTc9nmLZg0BiA_I-rbASmP';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_vDpsLz6gAZTc9nmLZg0BiA_I-rbASpM';
 const cloudClient=window.supabase?.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 let cloudUser=null, cloudReady=false, cloudTimer=null, cloudSaving=false, cloudPending=false;
 function cloudStatus(message,isError=false){const el=$('cloud-status');if(!el)return;el.textContent=message;el.classList.toggle('error',isError)}
@@ -399,6 +401,34 @@ async function initCloud(){
     if(error){cloudStatus(error.message,true);return}
     if(result.user)await loadCloudForUser(result.user);
   };
+  $('cloud-forgot-password').onclick=async()=>{
+    const email=$('cloud-email').value.trim();
+    if(!email){cloudStatus('Masukkan email akun Cukupin terlebih dahulu.',true);$('cloud-email').focus();return}
+    cloudStatus('Mengirim permintaan pemulihan password...');
+    const redirectTo=location.origin+location.pathname;
+    const {error}=await cloudClient.auth.resetPasswordForEmail(email,{redirectTo});
+    if(error){console.error('Cukupin password recovery:',error);cloudStatus('Permintaan belum dapat dikirim. Periksa email dan pengaturan URL Supabase, lalu coba lagi.',true);return}
+    cloudStatus('Jika email terdaftar, tautan pemulihan akan dikirim. Periksa Inbox dan folder Spam.');
+  };
+  $('cloud-cancel-recovery').onclick=async()=>{
+    $('cloud-reset-panel').hidden=true;
+    $('cloud-actions').hidden=false;
+    $('cloud-new-password').value='';$('cloud-confirm-password').value='';
+    cloudStatus('Silakan masuk menggunakan email dan password akun.');
+  };
+  $('cloud-update-password').onclick=async()=>{
+    const password=$('cloud-new-password').value,confirm=$('cloud-confirm-password').value;
+    if(password.length<8){cloudStatus('Password baru minimal 8 karakter.',true);return}
+    if(password!==confirm){cloudStatus('Konfirmasi password belum sama.',true);return}
+    cloudStatus('Menyimpan password baru...');
+    const {error}=await cloudClient.auth.updateUser({password});
+    if(error){console.error('Cukupin update password:',error);cloudStatus('Password belum berhasil diperbarui: '+error.message,true);return}
+    $('cloud-new-password').value='';$('cloud-confirm-password').value='';
+    $('cloud-reset-panel').hidden=true;$('cloud-actions').hidden=false;
+    await cloudClient.auth.signOut();
+    cloudUser=null;cloudReady=false;updateAuthUI();
+    cloudStatus('Password berhasil diperbarui. Silakan masuk dengan password baru.');
+  };
   $('cloud-signup').onclick=async()=>{
     const email=$('cloud-email').value.trim(),password=$('cloud-password').value;
     if(!email||password.length<6){cloudStatus('Isi email dan kata sandi minimal 6 karakter.',true);return}
@@ -417,8 +447,17 @@ async function initCloud(){
   };
   $('cloud-sync').onclick=async()=>{if(!cloudUser)return;await cloudSaveNow()};
   cloudClient.auth.onAuthStateChange((event,session)=>{
-    if(event==='SIGNED_OUT'){cloudUser=null;cloudReady=false;updateAuthUI()}
-    else if(session?.user&&event==='TOKEN_REFRESHED'){cloudUser=session.user;updateAuthUI()}
+    if(event==='PASSWORD_RECOVERY'){
+      $('cloud-actions').hidden=true;
+      $('cloud-logged-in').hidden=true;
+      $('cloud-reset-panel').hidden=false;
+      $('cloud-new-password').value='';$('cloud-confirm-password').value='';
+      cloudStatus('Tautan pemulihan terverifikasi. Silakan buat password baru.');
+    }else if(event==='SIGNED_OUT'){
+      cloudUser=null;cloudReady=false;updateAuthUI();
+    }else if(session?.user&&event==='TOKEN_REFRESHED'){
+      cloudUser=session.user;updateAuthUI();
+    }
   });
   setup();
   const {data:sessionData,error}=await cloudClient.auth.getSession();
