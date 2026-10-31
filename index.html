@@ -308,7 +308,7 @@ let data;try{data=JSON.parse(localStorage.getItem(KEY))||fresh()}catch{data=fres
 function normalize(x){if(!x||typeof x!=='object'||Array.isArray(x))return fresh();return {period:/^\d{4}-(0[1-9]|1[0-2])$/.test(x.period)?x.period:today().slice(0,7),budgets:x.budgets&&typeof x.budgets==='object'&&!Array.isArray(x.budgets)?x.budgets:{},transactions:Array.isArray(x.transactions)?x.transactions:[],recurring:Array.isArray(x.recurring)?x.recurring:[],notes:x.notes&&typeof x.notes==='object'?x.notes:{},onboarded:!!x.onboarded,demo:!!x.demo}}
 data=normalize(data);
 const SUPABASE_URL='https://cychzjimtlmqhxdukjeg.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY='sb_publishable_vDpsLz6gAZTc9nmLZg0BiA_I-rbASpM';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_vDpsLz6gAZTc9nmLZg0BiA_I-rbASmP';
 const cloudClient=window.supabase?.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 let cloudUser=null, cloudReady=false, cloudTimer=null, cloudSaving=false, cloudPending=false;
 function cloudStatus(message,isError=false){const el=$('cloud-status');if(!el)return;el.textContent=message;el.classList.toggle('error',isError)}
